@@ -1,0 +1,8 @@
+openai
+chromadb
+langdetect
+pypdf
+python-dotenv
+streamlit
+tiktoken
+gdown

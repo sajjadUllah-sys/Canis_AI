@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.pyc
+# Virtual environment
+venv/
+
+# ChromaDB (local vector database - regenerate from knowledge base)
+chroma_db/
+*.db
+*.sqlite3
+*.zip
+# IDE
+.vscode/
+
+knowledge_base/
