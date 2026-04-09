@@ -39,6 +39,7 @@ def get_canis_response(
     api_key: str,
     retriever=None,               # Optional: Retriever instance (rag/retriever.py)
     debug: bool = False,          # If True, return assembled system prompt too
+    dynamic_system_prompt: str = "",  # Dynamic UX + tier-specific prompt from UI
 ) -> dict:
     """
     Main function called by the Django backend for every chat turn.
@@ -54,6 +55,8 @@ def get_canis_response(
         api_key:               OpenAI API key
         retriever:             Optional Retriever instance for RAG
         debug:                 If True, include assembled system prompt in return
+        dynamic_system_prompt: Optional dynamic system prompt with UX rules and
+                               tier-specific instructions (built by Streamlit UI)
 
     Returns:
         {
@@ -93,6 +96,7 @@ def get_canis_response(
         plan_tier=plan_tier,
         context_block=context_block,
         escalation_note=escalation_note,
+        dynamic_system_prompt=dynamic_system_prompt,
     )
 
     # ── 5. Build messages array ────────────────────────────────────
@@ -162,6 +166,7 @@ def _build_system_prompt(
     plan_tier: str,
     context_block: str,
     escalation_note: Optional[str],
+    dynamic_system_prompt: str = "",
 ) -> str:
     """Assemble the layered system prompt in correct order."""
 
@@ -191,6 +196,10 @@ def _build_system_prompt(
     # Layer 4: Escalation flag (only if triggered)
     if escalation_note:
         parts.append(f"\n\n{escalation_note}")
+
+    # Layer 5: Dynamic UX + tier-specific prompt (from Streamlit UI)
+    if dynamic_system_prompt:
+        parts.append(f"\n\n{dynamic_system_prompt}")
 
     return "\n".join(parts)
 

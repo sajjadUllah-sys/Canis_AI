@@ -11,6 +11,8 @@ Lets you test the full AI pipeline:
 - Session metadata tracking
 - RAG context visibility (debug mode)
 - Risk tier display
+- Consultation usage tracking (mock backend)
+- Dynamic system prompt generation with UX rules
 """
 
 import os
@@ -35,6 +37,10 @@ DB_DIR = "chroma_db"
 ZIP_PATH = "chroma_db.zip"
 FILE_ID = "1TrvepoUnEJEtfcRv6b1UTVp78_vh7YS7"
 DOWNLOAD_URL = f"https://drive.google.com/uc?id={FILE_ID}"
+
+# ── Consultation limits ───────────────────────────────────────────
+BASIC_LIMIT   = 5
+PREMIUM_LIMIT = 50
 
 
 @st.cache_resource(show_spinner=False)
@@ -104,7 +110,177 @@ def init_state():
     if "debug_system_prompt" not in st.session_state:
         st.session_state.debug_system_prompt = ""
 
+    # ── Mock backend: consultation tracking ───────────────────────
+    if "basic_consultations_used" not in st.session_state:
+        st.session_state.basic_consultations_used = 0
+    if "premium_consultations_used" not in st.session_state:
+        st.session_state.premium_consultations_used = 0
+    if "premium_addons" not in st.session_state:
+        st.session_state.premium_addons = 0
+    if "interaction_count" not in st.session_state:
+        st.session_state.interaction_count = 0
+
 init_state()
+
+
+# ══════════════════════════════════════════════════════════════════
+# DYNAMIC SYSTEM PROMPT GENERATION
+# ══════════════════════════════════════════════════════════════════
+
+def build_dynamic_system_prompt(plan_tier: str, dog_profile: dict) -> str:
+    """
+    Constructs a highly specific system prompt based on:
+    - Universal UX/tone rules (both tiers)
+    - Tier-specific behavioral instructions
+    - Interaction count (for upgrade injection)
+    - Dog profile context
+    """
+
+    # ── Universal Rules (applied to both tiers) ───────────────────
+    universal_rules = """
+═══════════════════════════════════════════
+CONVERSATIONAL UX RULES (ALWAYS APPLY)
+═══════════════════════════════════════════
+
+TONE & FORMAT:
+- Never write like an article or blog post. You are having a real conversation.
+- Avoid generic numbered lists (1, 2, 3...) unless you are explicitly outlining a
+  justified Premium protocol with phases and durations.
+- Reason with the user through guided thinking rather than presenting a menu of options.
+
+PACING:
+- Shift from "Here are several things you can do" to "Here's what might be happening,
+  here's where to start, and let me understand more so we can adapt."
+- Lead with interpretation and a focused starting point, then deepen as you learn more.
+
+CONVERSATION FLOW:
+- The conversation must NEVER end after an answer. ALWAYS conclude your response with
+  a relevant, contextual follow-up question to keep the interaction alive and gather
+  better context about the dog's specific situation.
+- Your follow-up question should be specific to what was just discussed, not generic.
+"""
+
+    # ── Tier-Specific Rules ───────────────────────────────────────
+    if plan_tier.lower() == "basic":
+        tier_rules = """
+═══════════════════════════════════════════
+BASIC PLAN — BEHAVIORAL INSTRUCTIONS
+═══════════════════════════════════════════
+
+You are CANIS. Provide general guidance to understand the dog's behavior.
+Explain possible underlying causes with reassurance and normalization.
+Give 1 or 2 high-level suggestions.
+
+DO NOT use lists.
+DO NOT provide step-by-step plans, structured routines, timelines, or adaptive guidance.
+Answer "Why is this happening?" but not fully "What exactly should I do?"
+
+Your goal is to help the user understand the emotional and behavioral landscape,
+not to hand them a protocol.
+"""
+        # Soft upgrade injection after first interaction
+        if st.session_state.interaction_count >= 1:
+            tier_rules += """
+UPGRADE PROMPT INJECTION:
+Before your final follow-up question, include a soft, conversational upgrade prompt.
+Weave it naturally into your response — for example:
+"Want a step-by-step plan tailored specifically for this?" or
+"I can guide you through this with a structured plan if you'd like — that's available on Premium."
+Do NOT make the upgrade prompt feel forced or salesy. It should feel like a natural offer to help more.
+"""
+
+    else:  # premium
+        tier_rules = """
+═══════════════════════════════════════════
+PREMIUM PLAN — BEHAVIORAL INSTRUCTIONS
+═══════════════════════════════════════════
+
+You are CANIS. Your goal is deep behavioral interpretation, ongoing conversational
+coaching, and delivering real results.
+
+Do not default to rigid instructions immediately; first, ask targeted questions to
+build a clear picture of the dog, environment, and situation.
+
+Once context is gathered, provide structured, step-by-step protocols.
+When presenting protocols, you MAY use clear, well-justified numbered lists
+outlining phases, durations, and progress indicators.
+
+Provide adaptive guidance — what to do if it works, and what to do if it doesn't.
+
+Answer "What should I do step by step, and how do I adjust over time?"
+"""
+
+    # ── Dog Profile Context ───────────────────────────────────────
+    profile_context = _format_profile_for_prompt(dog_profile)
+
+    # ── Assemble ──────────────────────────────────────────────────
+    return universal_rules + "\n" + tier_rules + "\n" + profile_context
+
+
+def _format_profile_for_prompt(dog_profile: dict) -> str:
+    """Format dog profile data into a prompt-injectable context block."""
+    parts = ["\n--- KNOWN DOG CONTEXT (use this to personalize your response) ---"]
+
+    name = dog_profile.get("name", "Unknown")
+    parts.append(f"Dog Name: {name}")
+    parts.append(f"Breed: {dog_profile.get('breed', 'Unknown')}")
+    parts.append(f"Age: {dog_profile.get('age', 'Unknown')}")
+    parts.append(f"Gender: {dog_profile.get('gender', 'Unknown')}")
+    parts.append(f"Weight: {dog_profile.get('weight', 'Unknown')}")
+    parts.append(f"Neutered/Spayed: {'Yes' if dog_profile.get('neutered_spayed') else 'No'}")
+    parts.append(f"Origin: {dog_profile.get('origin', 'Unknown')}")
+    parts.append(f"Home type: {dog_profile.get('home_type', 'Unknown')}")
+
+    other_pets = dog_profile.get("other_pets", [])
+    parts.append(f"Other pets: {', '.join(other_pets) if other_pets else 'None'}")
+    parts.append(f"Family: {dog_profile.get('family_members', 'Unknown')}")
+
+    medical = dog_profile.get("medical_conditions", [])
+    parts.append(f"Medical conditions: {', '.join(medical) if medical else 'None'}")
+
+    triggers = dog_profile.get("triggers", [])
+    parts.append(f"Known triggers: {', '.join(triggers) if triggers else 'None'}")
+
+    behavioral = dog_profile.get("behavioral_conditions", [])
+    parts.append(f"Behavioral conditions: {', '.join(behavioral) if behavioral else 'None'}")
+
+    traits = dog_profile.get("behavioral_traits", [])
+    parts.append(f"Behavioral traits: {', '.join(traits) if traits else 'None'}")
+
+    notes = dog_profile.get("notes", "")
+    if notes:
+        parts.append(f"Additional notes: {notes}")
+
+    parts.append(f"Always refer to the dog as {name}.")
+    parts.append("--- END KNOWN DOG CONTEXT ---")
+
+    return "\n".join(parts)
+
+
+# ══════════════════════════════════════════════════════════════════
+# CONSULTATION LIMIT HELPERS
+# ══════════════════════════════════════════════════════════════════
+
+def is_chat_disabled(plan_tier: str) -> bool:
+    """Returns True if the user has exhausted their consultation quota."""
+    if plan_tier == "basic":
+        return st.session_state.basic_consultations_used >= BASIC_LIMIT
+    else:  # premium
+        return (
+            st.session_state.premium_consultations_used >= PREMIUM_LIMIT
+            and st.session_state.premium_addons <= 0
+        )
+
+
+def consume_consultation(plan_tier: str):
+    """Deduct one consultation from the user's quota."""
+    if plan_tier == "basic":
+        st.session_state.basic_consultations_used += 1
+    else:  # premium
+        if st.session_state.premium_consultations_used < PREMIUM_LIMIT:
+            st.session_state.premium_consultations_used += 1
+        elif st.session_state.premium_addons > 0:
+            st.session_state.premium_addons -= 1
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -126,6 +302,51 @@ with st.sidebar:
         horizontal=True,
         help="Basic: concepts only. Premium: full protocols."
     )
+
+    # ── Consultation Usage Tracker ────────────────────────────────
+    if plan_tier == "basic":
+        used = st.session_state.basic_consultations_used
+        st.markdown(f"**Consultations:** `{used}/{BASIC_LIMIT}` used")
+        st.progress(min(used / BASIC_LIMIT, 1.0))
+
+        if used >= BASIC_LIMIT:
+            st.error(
+                "🚫 Consultation limit reached. "
+                "Please upgrade to Premium to continue."
+            )
+
+    else:  # premium
+        used = st.session_state.premium_consultations_used
+        addons = st.session_state.premium_addons
+        total_available = PREMIUM_LIMIT + addons
+        total_used = used + max(0, addons - st.session_state.premium_addons)  # simplify display
+
+        st.markdown(f"**Consultations:** `{used}/{PREMIUM_LIMIT}` base used")
+        st.progress(min(used / PREMIUM_LIMIT, 1.0))
+
+        if addons > 0:
+            st.info(f"➕ **Add-on credits remaining:** {addons}")
+        elif used >= PREMIUM_LIMIT:
+            st.warning(
+                "⚠️ Base consultations exhausted. "
+                "Purchase add-ons below to continue."
+            )
+
+        # ── Add-on Purchase (Simulated) ───────────────────────────
+        st.markdown("**Add-ons (Simulate Purchase)**")
+        addon_cols = st.columns(3)
+        with addon_cols[0]:
+            if st.button("+10", key="addon_10", use_container_width=True):
+                st.session_state.premium_addons += 10
+                st.rerun()
+        with addon_cols[1]:
+            if st.button("+25", key="addon_25", use_container_width=True):
+                st.session_state.premium_addons += 25
+                st.rerun()
+        with addon_cols[2]:
+            if st.button("+50", key="addon_50", use_container_width=True):
+                st.session_state.premium_addons += 50
+                st.rerun()
 
     st.divider()
 
@@ -191,6 +412,18 @@ with st.sidebar:
         st.session_state.session_metadata     = SessionMetadata.new().to_dict()
         st.session_state.last_risk_tier        = "green"
         st.session_state.debug_system_prompt   = ""
+        st.session_state.interaction_count     = 0
+        st.rerun()
+
+    if st.button("🗑️ Reset All Counters", use_container_width=True):
+        st.session_state.basic_consultations_used   = 0
+        st.session_state.premium_consultations_used = 0
+        st.session_state.premium_addons             = 0
+        st.session_state.interaction_count          = 0
+        st.session_state.conversation_history       = []
+        st.session_state.session_metadata           = SessionMetadata.new().to_dict()
+        st.session_state.last_risk_tier             = "green"
+        st.session_state.debug_system_prompt        = ""
         st.rerun()
 
 
@@ -217,7 +450,7 @@ st.divider()
 # ── Session Metadata Panel ────────────────────────────────────────
 if show_metadata:
     meta = st.session_state.session_metadata
-    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
     with mcol1:
         color = "red" if meta.get("turns_without_progress", 0) >= 3 else "normal"
         st.metric("Turns w/o Progress", meta.get("turns_without_progress", 0))
@@ -228,6 +461,8 @@ if show_metadata:
         st.metric("Regression Reported", "YES ⚠️" if meta.get("regression_reported") else "No")
     with mcol4:
         st.metric("Pro Referral Given", "YES" if meta.get("professional_referral_given") else "No")
+    with mcol5:
+        st.metric("Interactions", st.session_state.interaction_count)
 
     st.divider()
 
@@ -248,13 +483,37 @@ with chat_container:
                     st.markdown(msg["content"])
 
 # ── Chat Input ────────────────────────────────────────────────────
-user_input = st.chat_input(f"Ask about {dog_profile['name']}'s behavior...")
+chat_disabled = is_chat_disabled(plan_tier)
+
+if chat_disabled:
+    if plan_tier == "basic":
+        st.warning(
+            "🔒 You've reached your Basic plan limit (5 consultations). "
+            "Upgrade to Premium to unlock 50 consultations and structured coaching."
+        )
+    else:
+        st.warning(
+            "🔒 All Premium consultations and add-ons exhausted. "
+            "Purchase add-ons from the sidebar to continue."
+        )
+
+user_input = st.chat_input(
+    f"Ask about {dog_profile['name']}'s behavior...",
+    disabled=chat_disabled,
+)
 
 if user_input:
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         st.error("OpenAI API key not found. Please set OPENAI_API_KEY in your .env file.")
         st.stop()
+
+    # ── Increment counters ────────────────────────────────────────
+    st.session_state.interaction_count += 1
+    consume_consultation(plan_tier)
+
+    # ── Build the dynamic system prompt ───────────────────────────
+    dynamic_prompt = build_dynamic_system_prompt(plan_tier, dog_profile)
 
     # Show user message immediately
     with st.chat_message("user"):
@@ -272,6 +531,7 @@ if user_input:
                 api_key=api_key,
                 retriever=get_retriever(),
                 debug=debug_mode,
+                dynamic_system_prompt=dynamic_prompt,
             )
 
         # Display response
@@ -307,3 +567,11 @@ if debug_mode:
 
     with st.expander("🔍 Raw Conversation History", expanded=False):
         st.json(st.session_state.conversation_history)
+
+    with st.expander("🔍 Mock Backend State", expanded=False):
+        st.json({
+            "basic_consultations_used":   st.session_state.basic_consultations_used,
+            "premium_consultations_used":  st.session_state.premium_consultations_used,
+            "premium_addons":             st.session_state.premium_addons,
+            "interaction_count":          st.session_state.interaction_count,
+        })
